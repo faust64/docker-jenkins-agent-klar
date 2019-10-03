@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: Template
+labels:
+  app: jenkins-agents
+metadata:
+  annotations:
+    description: Jenkins Klar agent image
+    iconClass: icon-jenkins
+    openshift.io/display-name: Jenkins
+    openshift.io/documentation-url: https://docs.openshift.org/latest/using_images/other_images/jenkins.html
+    openshift.io/long-description: This template builds a set of Jenkins agents images.
+    tags: jenkins
+  name: jenkins-agent-klar
+objects:
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    name: jenkins-agent-klar
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    annotations:
+      description: Builds Jenkins Agent - Klar
+    name: jenkins-agent-klar
+  spec:
+    output:
+      to:
+        kind: ImageStreamTag
+        name: jenkins-agent-klar:${JENKINS_KLAR_REF}
+    resources:
+      limits:
+        cpu: 200m
+        memory: 768Mi
+    source:
+      contextDir: ${JENKINS_KLAR_CONTEXT}
+      git:
+        uri: ${JENKINS_KLAR_GIT}
+        ref: "${JENKINS_KLAR_REF}"
+      type: Git
+    strategy:
+      type: Docker
+      dockerStrategy:
+        env:
+        - name: HTTP_PROXY
+          value: "${HTTP_PROXY}"
+        - name: HTTPS_PROXY
+          value: "${HTTPS_PROXY}"
+        - name: NO_PROXY
+          value: "${NO_PROXY}"
+        forcePull: false
+    triggers:
+    - type: ImageChange
+    - type: ConfigChange
+parameters:
+- description: Jenkins Klar Agent Dockerfile Root Directory
+  displayName: Jenkins Klar Agent ContextDir
+  name: JENKINS_KLAR_CONTEXT
+  value: /
+- description: Jenkins Klar Agent Repository
+  displayName: Jenkins Klar Agent Repository
+  name: JENKINS_KLAR_GIT
+  value: https://github.com/faust64/docker-jenkins-agent-klar
+- description: Jenkins Klar Agent Repository Branch, Tag or Commit hash
+  displayName: Jenkins Klar Agent Repository Ref
+  name: JENKINS_KLAR_REF
+  value: master
+- name: HTTP_PROXY
+- name: HTTPS_PROXY
+- name: NO_PROXY

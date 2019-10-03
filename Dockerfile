@@ -16,7 +16,7 @@ RUN if yum -y install epel-release; then \
 	fi \
 	&& yum -y install ca-certificates jq; \
     else \
-	curl https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o /usr/bin/jq; \
+	curl https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o /usr/bin/jq \
 	&& chmod +x /usr/bin/jq; \
     fi \
     && ( test -d /usr/local/bin || mkdir -p /usr/local/bin ) \

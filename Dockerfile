@@ -19,6 +19,8 @@ RUN if yum -y install epel-release; then \
 	curl https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o /usr/bin/jq \
 	&& chmod +x /usr/bin/jq; \
     fi \
+    && yum clean all -y \
+    && rm -rf /var/cache/yum /usr/share/doc /usr/share/man \
     && ( test -d /usr/local/bin || mkdir -p /usr/local/bin ) \
     && curl -vvv -fsL https://github.com/optiopay/klar/releases/download/v2.4.0/klar-2.4.0-linux-amd64 -o /usr/local/bin/klar \
     && chmod +x /usr/local/bin/klar

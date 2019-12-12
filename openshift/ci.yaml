@@ -1,0 +1,226 @@
+apiVersion: v1
+kind: Template
+labels:
+  app: jenkins-agent-klar
+  template: jenkins-agent-klar-jenkins-pipeline
+metadata:
+  annotations:
+    description: Jenkins Agent Klar Image - Jenkinsfile
+      see https://github.com/faust64/docker-jenkins-agent-klar
+    iconClass: icon-openshift
+    openshift.io/display-name: Jenkins Agent Klar CI
+    tags: jenkins-agent-klar
+  name: jenkins-agent-klar-jenkins-pipeline
+objects:
+- apiVersion: v1
+  kind: BuildConfig
+  metadata:
+    annotations:
+      description: Builds Jenkins Agent Klar images
+    name: jenkinsagentklar-jenkins-pipeline
+  spec:
+    strategy:
+      jenkinsPipelineStrategy:
+        jenkinsfile: |-
+          def gitCommitMsg = ''
+          def templateMark = 'jak-jenkins-ci'
+          def templateSel  = 'jenkins-ci-mark'
+          pipeline {
+              agent {
+                  node { label 'maven' }
+              }
+              options { timeout(time: 130, unit: 'MINUTES') }
+              parameters {
+                  string(defaultValue: 'master', description: 'Jenkins Agent Klar Docker Image - Source Git Branch', name: 'jenkinsagentklarBranch')
+                  string(defaultValue: 'master', description: 'Jenkins Agent Klar Docker Image - Source Git Hash', name: 'jenkinsagentklarHash')
+                  string(defaultValue: '${GIT_SOURCE_HOST}/faust64/docker-jenkins-agent-klar.git', description: 'Jenkins Agent Klar Docker Image - Source Git Repository', name: 'jenkinsagentklarRepo')
+                  string(defaultValue: '3', description: 'Max Retry', name: 'jobMaxRetry')
+                  string(defaultValue: '1', description: 'Retry Count', name: 'jobRetryCount')
+              }
+              stages {
+                  stage('pre-cleanup') {
+                      steps {
+                          script {
+                              openshift.withCluster() {
+                                  openshift.withProject() {
+                                      echo "Using project: ${openshift.project()}"
+                                      echo "cleaning up previous assets for jak-${params.jenkinsagentklarHash}"
+                                      openshift.selector("all", [ "${templateSel}": "${templateMark}-${params.jenkinsagentklarHash}" ]).delete()
+                                      openshift.selector("secrets", [ "${templateSel}": "${templateMark}-${params.jenkinsagentklarHash}" ]).delete()
+                                  }
+                              }
+                          }
+                      }
+                  }
+                  stage('create') {
+                      steps {
+                          script {
+                              openshift.withCluster() {
+                                  openshift.withProject() {
+                                      def namespace = "${openshift.project()}"
+                                      try {
+                                          timeout(10) {
+                                              def cloneProto = "http"
+                                              def created
+                                              def objectsFromTemplate
+                                              def privateRepo = false
+                                              def repoHost = params.jenkinsagentklarRepo.split('/')[0]
+                                              def templatePath = "/tmp/workspace/${namespace}/${namespace}-jenkinsagentklar-jenkins-pipeline/tmpjak${params.jenkinsagentklarBranch}/openshift"
+                                              sh "git config --global http.sslVerify false"
+                                              sh "rm -fr tmpjak${params.jenkinsagentklarBranch}; mkdir -p tmpjak${params.jenkinsagentklarBranch}"
+                                              dir ("tmpjak${params.jenkinsagentklarBranch}") {
+                                                  try {
+                                                      withCredentials([string(credentialsId: "git-${repoHost}", variable: 'GIT_TOKEN')]) {
+                                                          cloneProto = "https"
+                                                          privateRepo = true
+                                                          echo "cloning ${params.jenkinsagentklarRepo} over https, using ${repoHost} token"
+                                                          try { git([ branch: "${params.jenkinsagentklarBranch}", url: "https://${GIT_TOKEN}@${params.jenkinsagentklarRepo}" ]) }
+                                                          catch(e2) {
+                                                              echo "Failed cloning ${params.jenkinsagentklarRepo}#${params.jenkinsagentklarBranch} - ${e2}"
+                                                              throw e2
+                                                          }
+                                                      }
+                                                  } catch(e) {
+                                                      if (privateRepo != true) {
+                                                          echo "caught ${e} - assuming no credentials required"
+                                                          echo "cloning ${params.jenkinsagentklarRepo} over http"
+                                                          try { git([ branch: "${params.jenkinsagentklarBranch}", url: "http://${params.jenkinsagentklarRepo}" ]) }
+                                                          catch(e2) {
+                                                              echo "Failed cloning ${params.jenkinsagentklarRepo}#${params.jenkinsagentklarBranch} - ${e2}"
+                                                              throw e2
+                                                          }
+                                                      } else { throw e }
+                                                  }
+                                                  try {
+                                                      gitCommitMsg = sh(returnStdout: true, script: "git log -n 1").trim()
+                                                  } catch(e) { echo "In non-critical catch block resolving commit message - ${e}" }
+                                              }
+                                              try { sh "test -d ${templatePath}" }
+                                              catch (e) {
+                                                  echo "Could not find ./openshift in ${params.jenkinsagentklarRepo}#${params.jenkinsagentklarBranch}"
+                                                  throw e
+                                              }
+                                              echo "Processing JenkinsAgentKlar:${params.jenkinsagentklarHash}, from ${repoHost}, tagging to ${params.jenkinsagentklarBranch}"
+                                              try {
+                                                  echo " == Creating ImageStream =="
+                                                  objectsFromTemplate = openshift.process("-f", "${templatePath}/imagestream.yaml")
+                                                  echo "The template will create ${objectsFromTemplate.size()} objects"
+                                                  created = openshift.apply(objectsFromTemplate)
+                                                  created.withEach { echo "Created ${it.name()} with labels ${it.object().metadata.labels}" }
+                                              } catch(e) { echo "In non-critical catch block while creating ImageStream - ${e}" }
+                                              echo " == Creating BuildConfigs =="
+                                              if (privateRepo) {
+                                                  withCredentials([string(credentialsId: "git-${repoHost}", variable: 'GIT_TOKEN')]) {
+                                                      objectsFromTemplate = openshift.process("-f", "${templatePath}/build-with-secret.yaml", '-p', "GIT_DEPLOYMENT_TOKEN=${GIT_TOKEN}",
+                                                          '-p', "JAK_REPOSITORY_REF=${params.jenkinsagentklarHash}", '-p', "JAK_REPOSITORY_URL=${cloneProto}://${params.jenkinsagentklarRepo}")
+                                                  }
+                                              } else {
+                                                  objectsFromTemplate = openshift.process("-f", "${templatePath}/build.yaml",
+                                                      '-p', "JAK_REPOSITORY_REF=${params.jenkinsagentklarHash}", '-p', "JAK_REPOSITORY_URL=${cloneProto}://${params.jenkinsagentklarRepo}")
+                                              }
+                                              echo "The template will create ${objectsFromTemplate.size()} objects"
+                                              for (o in objectsFromTemplate) { o.metadata.labels["${templateSel}"] = "${templateMark}-${params.jenkinsagentklarHash}" }
+                                              created = openshift.apply(objectsFromTemplate)
+                                              created.withEach { echo "Created ${it.name()} from template with labels ${it.object().metadata.labels}" }
+                                          }
+                                      } catch(e) {
+                                          echo "In catch block while creating resources - ${e}"
+                                          throw e
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+                  stage('build') {
+                      steps {
+                          script {
+                              openshift.withCluster() {
+                                  openshift.withProject() {
+                                      try {
+                                          timeout(90) {
+                                              echo "watching jak-${params.jenkinsagentklarHash} docker image build"
+                                              def builds = openshift.selector("bc", [ name: "jak-${params.jenkinsagentklarHash}" ]).related('builds')
+                                              builds.untilEach(1) { return (it.object().status.phase == "Complete") }
+                                          }
+                                      } catch(e) {
+                                          echo "In catch block while building Docker image - ${e}"
+                                          throw e
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+                  stage('tag') {
+                      steps {
+                          script {
+                              if ("${params.jenkinsagentklarBranch}" == "${params.jenkinsagentklarHash}") { echo "skipping tag - source matches target" }
+                              else {
+                                  openshift.withCluster() {
+                                      openshift.withProject() {
+                                          try {
+                                              timeout(5) {
+                                                  def namespace = "${openshift.project()}"
+                                                  retry(3) {
+                                                      sh """
+                                                      oc login https://kubernetes.default.svc.cluster.local --certificate-authority=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt --token=\$(cat /var/run/secrets/kubernetes.io/serviceaccount/token) > /dev/null 2>&1
+                                                      oc describe -n ${namespace} imagestreamtag jenkins-agent-klar:${params.jenkinsagentklarHash} || exit 1
+                                                      oc tag -n ${namespace} jenkins-agent-klar:${params.jenkinsagentklarHash} jenkins-agent-klar:${params.jenkinsagentklarBranch}
+                                                      """
+                                                  }
+                                              }
+                                          } catch(e) {
+                                              echo "In catch block while tagging Jenkins Agent Klar image - ${e}"
+                                              throw e
+                                          }
+                                      }
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+              post {
+                  always {
+                      script {
+                          openshift.withCluster() {
+                              openshift.withProject() {
+                                  def namespace   = "${openshift.project()}"
+                                  def postJobName = "${namespace}/${namespace}-post-triggers-jenkins-pipeline"
+                                  currentBuild.description = """
+                                  ${params.jenkinsagentklarRepo} ${params.jenkinsagentklarBranch} (try ${params.jobRetryCount}/${params.jobMaxRetry})
+                                  ${gitCommitMsg}
+                                  """.stripIndent()
+                                  echo "cleaning up assets for jak-${params.jenkinsagentklarHash}"
+                                  sh "rm -fr /tmp/workspace/${namespace}/${namespace}-jenkinsagentklar-jenkins-pipeline/tmpjak${params.jenkinsagentklarBranch}"
+                                  openshift.selector("all", [ "${templateSel}": "${templateMark}-${params.jenkinsagentklarHash}" ]).delete()
+                                  openshift.selector("secrets", [ "${templateSel}": "${templateMark}-${params.jenkinsagentklarHash}" ]).delete()
+                                  def jobParams = [
+                                          [$class: 'StringParameterValue', name: "jobMaxRetry", value: params.jobMaxRetry],
+                                          [$class: 'StringParameterValue', name: "jobRetryCount", value: params.jobRetryCount],
+                                          [$class: 'StringParameterValue', name: "jobStatus", value: currentBuild.currentResult],
+                                          [$class: 'StringParameterValue', name: "sourceBranch", value: params.jenkinsagentklarBranch],
+                                          [$class: 'StringParameterValue', name: "sourceComponent", value: "jenkinsagentklar"],
+                                          [$class: 'StringParameterValue', name: "sourceImageStream", value: "jenkins-agent-klar"],
+                                          [$class: 'StringParameterValue', name: "sourceRef", value: params.jenkinsagentklarHash],
+                                          [$class: 'StringParameterValue', name: "sourceRepo", value: params.jenkinsagentklarRepo]
+                                      ]
+                                  try { build job: postJobName, parameters: jobParams, propagate: false, wait: false }
+                                  catch(e) { echo "caught ${e} starting Job post-process" }
+                              }
+                          }
+                      }
+                  }
+                  changed { echo "changed?" }
+                  failure { echo "Build failed (${params.jobRetryCount} out of ${params.jobMaxRetry})" }
+                  success { echo "success!" }
+                  unstable { echo "unstable?" }
+              }
+          }
+      type: JenkinsPipeline
+parameters:
+- name: GIT_SOURCE_HOST
+  description: Git FQDN we would build images from
+  displayName: Git
+  value: github.com

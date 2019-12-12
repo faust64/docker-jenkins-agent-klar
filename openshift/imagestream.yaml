@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Template
+labels:
+  app: jenkins-agent-klar
+  template: jenkins-agent-klar-imagestream
+metadata:
+  annotations:
+    description: Jenkins Agent Klar Image - ImageStream
+      see https://github.com/faust64/docker-jenkins-agent-klar
+    iconClass: icon-openshift
+    openshift.io/display-name: Jenkins Agent Klar
+    tags: jenkins-agent-klar
+  name: jenkins-agent-klar-imagestream
+objects:
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    annotations:
+      description: Keeps track of changes in Jenkins Klar Agent image
+    name: jenkins-agent-klar

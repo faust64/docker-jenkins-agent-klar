@@ -1,19 +1,9 @@
-FROM golang:1.9-alpine AS builder
-
-WORKDIR /go/src/github.com/optiopay/klar
-
-COPY assets ./assets
-COPY clair ./clair
-COPY docker ./docker
-COPY utils ./utils
-COPY vendor ./vendor
-COPY *.go ./
+FROM golang:1.13-alpine AS builder
 
 RUN set -x \
     && apk --update add git \
-    && go get -d github.com/coreos/clair/database \
-    && CGO_ENABLED=0 go build -a -installsuffix cgo . \
-    && cp ./klar /klar
+    && go get -d github.com/optiopay/klar \
+    && go build ./src/github.com/optiopay/klar
 
 FROM openshift/jenkins-slave-base-centos7
 
@@ -27,7 +17,7 @@ LABEL com.redhat.component="jenkins-agent-klar" \
       help="For more information visit https://github.com/faust64/docker-jenkins-agent-klar" \
       version="1.0"
 
-COPY --from=builder /klar /usr/local/bin/klar
+COPY --from=builder /go/klar /usr/local/bin/klar
 
 RUN if yum -y install epel-release; then \
 	if test "$DO_UPGRADE"; then \

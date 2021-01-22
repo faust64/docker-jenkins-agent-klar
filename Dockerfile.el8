@@ -1,0 +1,47 @@
+FROM golang:1.11-alpine AS builder
+
+WORKDIR /go/src/github.com/optiopay/klar
+
+COPY assets ./assets
+COPY clair ./clair
+COPY docker ./docker
+COPY utils ./utils
+COPY vendor ./vendor
+COPY *.go ./
+ENV GO111MODULE=on
+
+RUN set -x \
+    && apk --update add git \
+    && go get -d github.com/coreos/clair/database@v2.1.6 \
+    && CGO_ENABLED=0 go build -a -installsuffix cgo . \
+    && cp ./klar /klar
+
+FROM quay.io/openshift/origin-jenkins-agent-base:latest
+
+LABEL com.redhat.component="jenkins-agent-klar" \
+      io.k8s.description="The jenkins agent klar image has the tools scanning Docker images against CoreOS Clair." \
+      io.k8s.display-name="Jenkins Agent - Klar" \
+      io.openshift.tags="openshift,jenkins,agent,clair,klar" \
+      architecture="x86_64" \
+      name="ci/jenkins-agent-klar" \
+      maintainer="Samuel MARTIN MORO <faust64@gmail.com>" \
+      help="For more information visit https://github.com/faust64/docker-jenkins-agent-klar" \
+      version="1.0"
+
+COPY --from=builder /klar /usr/local/bin/klar
+COPY config/* /
+
+RUN rm /etc/yum.repos.d/*.repo \
+    && mv /el8.repo /etc/yum.repos.d/ \
+    && if dnf -y install epel-release; then \
+	if test "$DO_UPGRADE"; then \
+	    dnf -y upgrade; \
+	fi \
+	&& dnf -y install ca-certificates jq \
+	&& dnf clean all -y; \
+    else \
+	curl https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64 -o /usr/bin/jq \
+	&& chmod +x /usr/bin/jq; \
+    fi
+
+USER 1001
